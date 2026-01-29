@@ -10,7 +10,7 @@ PROJECT_ID = "youcanmath"
 LOCATION = "global"
 DATA_STORE_ID = "ycm-rag-1" # Assicurati che sia l'ID corretto
 DATA_STORE_PATH = f"projects/{PROJECT_ID}/locations/global/collections/default_collection/dataStores/{DATA_STORE_ID}"
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "percorso/del/tuo/file-chiave.json"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./youcanmath-0bbe66621c1b.json"
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 
 # 2. Configurazione dello Schema di Risposta (JSON)
