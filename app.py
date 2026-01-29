@@ -10,8 +10,15 @@ PROJECT_ID = "youcanmath"
 LOCATION = "global"
 DATA_STORE_ID = "ycm-rag-1" # Assicurati che sia l'ID corretto
 DATA_STORE_PATH = f"projects/{PROJECT_ID}/locations/global/collections/default_collection/dataStores/{DATA_STORE_ID}"
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./youcanmath-0bbe66621c1b.json"
-vertexai.init(project=PROJECT_ID, location=LOCATION)
+
+# Carica le credenziali dai Secrets di Streamlit
+if "gcp_service_account" in st.secrets:
+    creds_info = st.secrets["gcp_service_account"]
+    credentials = service_account.Credentials.from_service_account_info(creds_info)
+    vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
+else:
+    # Per il test locale (se hai gcloud auth login fatto)
+    vertexai.init(project=PROJECT_ID, location=LOCATION)
 
 # 2. Configurazione dello Schema di Risposta (JSON)
 response_schema = {
