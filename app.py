@@ -37,10 +37,11 @@ response_schema = {
 }
 
 # 3. Setup del Modello con RAG
+# Sostituisci il vecchio blocco tools con questo:
 tools = [
     Tool.from_retrieval(
         retrieval=grounding.Retrieval(
-            vertex_ai_search=grounding.VertexAISearch(datastore=DATA_STORE_PATH)
+            source=grounding.VertexAISearch(datastore=DATA_STORE_PATH)
         )
     )
 ]
