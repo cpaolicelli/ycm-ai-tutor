@@ -6,15 +6,22 @@ from vertexai.generative_models import GenerativeModel, Tool, grounding, Generat
 
 # Configurazione costanti
 PROJECT_ID = "youcanmath"
-LOCATION = "global"
+LOCATION = "us-central1"
 DATA_STORE_ID = "ycm-rag-1"
 DATA_STORE_PATH = f"projects/{PROJECT_ID}/locations/global/collections/default_collection/dataStores/{DATA_STORE_ID}"
 
-# Autenticazione con Secrets di Streamlit
+# Recupero dai segreti di Streamlit
 if "gcp_service_account" in st.secrets:
-    creds_info = st.secrets["gcp_service_account"]
-    credentials = service_account.Credentials.from_service_account_info(creds_info)
-    vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
+    # Trasformiamo il dizionario dei segreti in un oggetto credenziali
+    info = dict(st.secrets["gcp_service_account"])
+    creds = service_account.Credentials.from_service_account_info(info)
+    
+    # Inizializzazione ESPLICITA
+    vertexai.init(
+        project="youcanmath", 
+        location="us-central1", # Cambia 'global' in 'us-central1' per l'API predittiva
+        credentials=creds
+    )
 else:
     vertexai.init(project=PROJECT_ID, location=LOCATION)
 
@@ -52,7 +59,7 @@ tools = [
 ]
 
 model = GenerativeModel(
-    "gemini-2.5-flash",
+    "gemini-1.5-flash",
     system_instruction="Sei il tutor di YouCanMath. Usa la RAG per rispondere. Se l'utente vuole un video, estrai video_url dai metadati. Se vuole un quiz, usa quiz_questions. Rispondi SEMPRE in JSON."
 )
 
