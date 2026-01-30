@@ -57,67 +57,62 @@ model = GenerativeModel(
     system_instruction=SYSTEM_INSTRUCTION
 )
 
-# --- INTERFACCIA STREAMLIT ---
-st.set_page_config(page_title="YouCanMath AI Tutor", page_icon="📐")
+# --- INTERFACCIA UTENTE ---
+st.set_page_config(page_title="YouCanMath AI Tutor", page_icon="📐", layout="wide")
 st.title("📐 YouCanMath AI Tutor")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Visualizzazione storico
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("Chiedimi pure..."):
+# Input Utente
+if prompt := st.chat_input("Chiedimi una spiegazione sugli insiemi..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Analizzando le lezioni..."):
-            # Chiamata RAG (Senza response_schema per evitare l'errore 400)
+        with st.spinner("Consultando il database YouCanMath..."):
+            # Chiamata a Gemini
             response = model.generate_content(
                 prompt,
                 tools=tools,
-                generation_config=GenerationConfig(
-                    temperature=0.2 # Bassa temperatura per maggiore stabilità JSON
-                )
+                generation_config=GenerationConfig(temperature=0.1)
             )
             
-            # Pulizia della risposta (rimuove eventuali blocchi ```json )
+            # Pulizia e Parsing del JSON
             raw_text = response.text
             clean_json = re.sub(r"```json\s?|```", "", raw_text).strip()
             
             try:
                 res_data = json.loads(clean_json)
-                intent = res_data.get("intent")
                 
                 for rec in res_data.get("recommendations", []):
-                    # Messaggio principale
-                    st.markdown(rec.get("message", ""))
+                    # 1. Messaggio del Tutor
+                    msg_text = rec.get("message", "")
+                    st.markdown(msg_text)
                     
-                    # Video
-                    if rec.get("video_url"):
-                        st.link_button("🎥 Guarda la Video Lezione", rec["video_url"])
+                    # 2. BOX VIDEO (Se presente URL)
+                    video_url = rec.get("video_url")
+                    if video_url:
+                        st.write("---")
+                        st.subheader("🎥 Video Lezione Suggerita")
+                        # Carica il video in un player nativo
+                        st.video(video_url)
+                        st.caption(f"Sorgente: {video_url}")
                     
-                    # Soluzione Step-by-Step
-                    if intent == "risoluzione_esercizio" and rec.get("step_by_step_solution"):
-                        with st.expander("Vedi i passaggi della soluzione"):
+                    # 3. Altri contenuti (Quiz/Soluzioni)
+                    if rec.get("step_by_step_solution"):
+                        with st.expander("📝 Vedi i passaggi matematici"):
                             for step in rec["step_by_step_solution"]:
-                                st.write(f"• {step}")
+                                st.latex(step) if "$" in step else st.write(step)
 
-                    # Quiz
-                    if intent == "interrogazione" and rec.get("quiz_questions"):
-                        st.info("Prova a rispondere a queste domande:")
-                        for q in rec["quiz_questions"]:
-                            st.write(f"❓ {q}")
-                
-                # Salvataggio nello storico
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": res_data["recommendations"][0]["message"]
-                })
-                
+                st.session_state.messages.append({"role": "assistant", "content": msg_text})
+
             except Exception as e:
-                st.error("Errore nel parsing della risposta dell'AI. Riprova.")
-                st.write(raw_text) # Utile per debug
+                st.error("Non sono riuscito a formattare la risposta. Ecco il testo:")
+                st.write(raw_text)
