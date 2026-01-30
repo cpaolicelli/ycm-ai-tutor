@@ -10,33 +10,26 @@ LOCATION = "us-central1"
 DATA_STORE_ID = "ycm-rag-1"
 DATA_STORE_PATH = f"projects/{PROJECT_ID}/locations/global/collections/default_collection/dataStores/{DATA_STORE_ID}"
 
-# DEBUG: Verifica se i segreti sono caricati senza mostrarli interamente
-if "gcp_service_account" in st.secrets:
-    secrets_dict = st.secrets["gcp_service_account"]
-    st.write("### 🛠 Debug Secrets")
-    st.write(f"✅ Project ID trovato: `{secrets_dict.get('project_id')}`")
-    st.write(f"✅ Email account: `{secrets_dict.get('client_email')}`")
-    
-    # Verifichiamo la chiave privata senza stamparla
-    pk = secrets_dict.get('private_key', "")
-    if pk:
-        st.write(f"✅ Private Key presente (Lunghezza: {len(pk)} caratteri)")
-        if pk.startswith("-----BEGIN PRIVATE KEY-----"):
-            st.write("✅ Formato Private Key: Inizia correttamente")
-        else:
-            st.error("❌ Formato Private Key ERRATO: Non inizia con il tag corretto")
-    else:
-        st.error("❌ Private Key MANCANTE nei segreti")
-else:
-    st.error("❌ Il blocco [gcp_service_account] non è stato trovato nei Secrets di Streamlit")
-
+# 1. Recupero e pulizia dei segreti
 if "gcp_service_account" in st.secrets:
     creds_info = dict(st.secrets["gcp_service_account"])
-    # Questo corregge i problemi di formatting dei caratteri \n
-    creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
     
+    # TRUCCO FONDAMENTALE: 
+    # Sostituisce i doppi backslash con veri a-capo per la chiave privata
+    if "private_key" in creds_info:
+        creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+    
+    # Crea l'oggetto credenziali
     credentials = service_account.Credentials.from_service_account_info(creds_info)
-    vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
+    
+    # Inizializza Vertex AI con credenziali ESPLICITE
+    vertexai.init(
+        project="youcanmath", 
+        location="us-central1", 
+        credentials=credentials
+    )
+else:
+    st.error("Secrets non trovati!")
 
 # 2. Configurazione dello Schema di Risposta (JSON)
 response_schema = {
