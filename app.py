@@ -33,27 +33,16 @@ tools = [
     )
 ]
 
-# System Prompt aggiornato con obbligo LaTeX
-SYSTEM_INSTRUCTION = """Sei il tutor esperto di YouCanMath. Usa la RAG per rispondere.
+# System Prompt migliorato per una spiegazione discorsiva e LaTeX mandatorio
+SYSTEM_INSTRUCTION = """Sei il tutor amichevole di YouCanMath. Usa le informazioni della RAG per spiegare i concetti.
+NON copiare solo i dati grezzi: crea una spiegazione discorsiva, accogliente e chiara.
 
-REGOLE MANDATORIE PER IL FORMATO:
-1. FORMULE MATEMATICHE: Ogni singola variabile, operazione o formula deve essere scritta in LaTeX racchiusa tra simboli del dollaro.
-   Esempio: Invece di scrivere 'x al quadrato', scrivi sempre '$x^2$'. Invece di 'A unione B', scrivi '$A \\cup B$'.
-2. OUTPUT: Rispondi ESCLUSIVAMENTE con un oggetto JSON valido. Non aggiungere spiegazioni fuori dal JSON.
+REGOLE MATEMATICHE:
+- Ogni formula o variabile DEVE essere in LaTeX tra dollari (es: $x$, $A \cup B$, $f(x)$).
 
-Struttura JSON:
-{
-  "intent": "spiegazione" | "interrogazione" | "risoluzione_esercizio",
-  "recommendations": [
-    {
-      "id_lesson": "ID",
-      "video_url": "URL",
-      "message": "Testo con formule LaTeX inline (es: $f(x) = y$)",
-      "quiz_questions": ["Domande con LaTeX"],
-      "step_by_step_solution": ["Passaggi con LaTeX"]
-    }
-  ]
-}
+REGOLE FORMATO:
+- Rispondi SEMPRE in JSON.
+- Il campo "message" deve contenere la spiegazione amichevole completa.
 """
 
 model = GenerativeModel(
@@ -62,67 +51,71 @@ model = GenerativeModel(
 )
 
 # --- INTERFACCIA UTENTE ---
-st.set_page_config(page_title="YouCanMath AI Tutor", page_icon="📐")
-st.title("📐 YouCanMath AI Tutor")
+st.set_page_config(page_title="YouCanMath AI Tutor", page_icon="👨🏻‍🏫", layout="centered")
 
-# CSS per rendere i caratteri matematici più leggibili
+# CSS per abbellire il LaTeX e i box
 st.markdown("""
     <style>
-    .stMarkdown p { font-size: 1.1rem; }
-    .katex { font-size: 1.1em; color: #1E88E5; }
+    .stMarkdown p { font-size: 1.1rem; line-height: 1.6; }
+    .video-container { border: 2px solid #1E88E5; border-radius: 10px; padding: 10px; background-color: #f0f2f6; }
     </style>
     """, unsafe_allow_html=True)
+
+st.title("📐 YouCanMath AI Tutor")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Visualizzazione storico
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("Chiedimi una spiegazione matematica..."):
+if prompt := st.chat_input("Chiedimi una lezione..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Calcolo in corso..."):
+        with st.spinner("Sto preparando la tua lezione..."):
             response = model.generate_content(
                 prompt,
                 tools=tools,
                 generation_config=GenerationConfig(temperature=0.1)
             )
             
-            # Pulizia automatica dei tag markdown JSON
+            # Pulizia e parsing JSON
             clean_json = re.sub(r"```json\s?|```", "", response.text).strip()
             
             try:
                 res_data = json.loads(clean_json)
                 
                 for rec in res_data.get("recommendations", []):
-                    # Messaggio principale con supporto LaTeX inline
-                    ans_text = rec.get("message", "")
-                    st.markdown(ans_text)
+                    # 1. Messaggio discorsivo del Tutor (con LaTeX)
+                    message_text = rec.get("message", "")
+                    st.markdown(message_text)
                     
-                    # Se l'AI ha trovato un video nei metadati del Data Store
+                    # 2. Finestra Anteprima Video (se presente l'URL nel DB)
                     if rec.get("video_url"):
                         st.write("---")
+                        st.markdown("### 📺 Video-Lezione Suggerita")
                         st.video(rec["video_url"])
+                        st.info(f"Titolo lezione: {rec.get('id_lesson', 'Dettagli')}")
                     
-                    # Passaggi matematici
+                    # 3. Soluzioni e Quiz
                     if rec.get("step_by_step_solution"):
-                        with st.expander("📝 Procedimento dettagliato"):
+                        with st.expander("🔍 Procedimento Matematico"):
                             for step in rec["step_by_step_solution"]:
                                 st.markdown(f"**-** {step}")
 
-                    # Quiz per lo studente
                     if rec.get("quiz_questions"):
-                        st.info("🎯 Esercitati ora:")
+                        st.write("---")
+                        st.success("🎯 Mettiti alla prova con questi quiz:")
                         for q in rec["quiz_questions"]:
                             st.markdown(f"❓ {q}")
                 
-                st.session_state.messages.append({"role": "assistant", "content": ans_text})
+                # Salvataggio nello storico
+                st.session_state.messages.append({"role": "assistant", "content": message_text})
 
             except Exception:
-                # Fallback nel caso il JSON sia malformato, mostra comunque il testo
                 st.markdown(response.text)
