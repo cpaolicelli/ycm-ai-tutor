@@ -33,20 +33,24 @@ tools = [
     )
 ]
 
-# Istruzioni di sistema per forzare l'output JSON senza response_schema
-SYSTEM_INSTRUCTION = """Sei il tutor AI di YouCanMath. Usa esclusivamente la RAG fornita per rispondere.
-Rispondi SEMPRE in formato JSON puro. Non aggiungere testo libero fuori dal JSON.
+# System Prompt aggiornato con obbligo LaTeX
+SYSTEM_INSTRUCTION = """Sei il tutor esperto di YouCanMath. Usa la RAG per rispondere.
 
-Struttura richiesta:
+REGOLE MANDATORIE PER IL FORMATO:
+1. FORMULE MATEMATICHE: Ogni singola variabile, operazione o formula deve essere scritta in LaTeX racchiusa tra simboli del dollaro.
+   Esempio: Invece di scrivere 'x al quadrato', scrivi sempre '$x^2$'. Invece di 'A unione B', scrivi '$A \\cup B$'.
+2. OUTPUT: Rispondi ESCLUSIVAMENTE con un oggetto JSON valido. Non aggiungere spiegazioni fuori dal JSON.
+
+Struttura JSON:
 {
   "intent": "spiegazione" | "interrogazione" | "risoluzione_esercizio",
   "recommendations": [
     {
-      "id_lesson": "ID della lezione",
-      "video_url": "URL del video se presente",
-      "message": "La tua spiegazione o risposta testuale principale",
-      "quiz_questions": ["domanda 1", "domanda 2"],
-      "step_by_step_solution": ["passaggio 1", "passaggio 2"]
+      "id_lesson": "ID",
+      "video_url": "URL",
+      "message": "Testo con formule LaTeX inline (es: $f(x) = y$)",
+      "quiz_questions": ["Domande con LaTeX"],
+      "step_by_step_solution": ["Passaggi con LaTeX"]
     }
   ]
 }
@@ -58,22 +62,20 @@ model = GenerativeModel(
 )
 
 # --- INTERFACCIA UTENTE ---
-st.set_page_config(page_title="YouCanMath AI Tutor", page_icon="📐", layout="centered")
+st.set_page_config(page_title="YouCanMath AI Tutor", page_icon="📐")
+st.title("📐 YouCanMath AI Tutor")
 
-# CSS personalizzato per migliorare la leggibilità del LaTeX
+# CSS per rendere i caratteri matematici più leggibili
 st.markdown("""
     <style>
-    .stMarkdown p { font-size: 1.1rem; line-height: 1.6; }
-    .katex { font-size: 1.1em ! lacer; }
+    .stMarkdown p { font-size: 1.1rem; }
+    .katex { font-size: 1.1em; color: #1E88E5; }
     </style>
     """, unsafe_allow_html=True)
-
-st.title("📐 YouCanMath AI Tutor")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Visualizzazione storico con supporto Markdown + LaTeX
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
@@ -84,42 +86,43 @@ if prompt := st.chat_input("Chiedimi una spiegazione matematica..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Risolvendo l'equazione..."):
+        with st.spinner("Calcolo in corso..."):
             response = model.generate_content(
                 prompt,
                 tools=tools,
                 generation_config=GenerationConfig(temperature=0.1)
             )
             
+            # Pulizia automatica dei tag markdown JSON
             clean_json = re.sub(r"```json\s?|```", "", response.text).strip()
             
             try:
                 res_data = json.loads(clean_json)
                 
                 for rec in res_data.get("recommendations", []):
-                    # Il messaggio principale ora renderizza il LaTeX grazie a st.markdown
-                    message_content = rec.get("message", "")
-                    st.markdown(message_content)
+                    # Messaggio principale con supporto LaTeX inline
+                    ans_text = rec.get("message", "")
+                    st.markdown(ans_text)
                     
-                    # Se c'è un video, lo carichiamo
+                    # Se l'AI ha trovato un video nei metadati del Data Store
                     if rec.get("video_url"):
                         st.write("---")
                         st.video(rec["video_url"])
                     
-                    # Soluzioni e Quiz con stile dedicato
+                    # Passaggi matematici
                     if rec.get("step_by_step_solution"):
-                        with st.expander("📝 Guarda i passaggi matematici"):
+                        with st.expander("📝 Procedimento dettagliato"):
                             for step in rec["step_by_step_solution"]:
-                                # Usiamo markdown per permettere mix di testo e formule inline
                                 st.markdown(f"**-** {step}")
 
+                    # Quiz per lo studente
                     if rec.get("quiz_questions"):
-                        st.info("🎯 Mettiti alla prova:")
+                        st.info("🎯 Esercitati ora:")
                         for q in rec["quiz_questions"]:
                             st.markdown(f"❓ {q}")
                 
-                st.session_state.messages.append({"role": "assistant", "content": message_content})
+                st.session_state.messages.append({"role": "assistant", "content": ans_text})
 
-            except Exception as e:
-                st.error("Errore di formattazione. Testo originale:")
-                st.write(response.text)
+            except Exception:
+                # Fallback nel caso il JSON sia malformato, mostra comunque il testo
+                st.markdown(response.text)
