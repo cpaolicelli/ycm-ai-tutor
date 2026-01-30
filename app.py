@@ -58,61 +58,68 @@ model = GenerativeModel(
 )
 
 # --- INTERFACCIA UTENTE ---
-st.set_page_config(page_title="YouCanMath AI Tutor", page_icon="📐", layout="wide")
+st.set_page_config(page_title="YouCanMath AI Tutor", page_icon="📐", layout="centered")
+
+# CSS personalizzato per migliorare la leggibilità del LaTeX
+st.markdown("""
+    <style>
+    .stMarkdown p { font-size: 1.1rem; line-height: 1.6; }
+    .katex { font-size: 1.1em ! lacer; }
+    </style>
+    """, unsafe_allow_html=True)
+
 st.title("📐 YouCanMath AI Tutor")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Visualizzazione storico
+# Visualizzazione storico con supporto Markdown + LaTeX
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Input Utente
-if prompt := st.chat_input("Chiedimi una spiegazione sugli insiemi..."):
+if prompt := st.chat_input("Chiedimi una spiegazione matematica..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Consultando il database YouCanMath..."):
-            # Chiamata a Gemini
+        with st.spinner("Risolvendo l'equazione..."):
             response = model.generate_content(
                 prompt,
                 tools=tools,
                 generation_config=GenerationConfig(temperature=0.1)
             )
             
-            # Pulizia e Parsing del JSON
-            raw_text = response.text
-            clean_json = re.sub(r"```json\s?|```", "", raw_text).strip()
+            clean_json = re.sub(r"```json\s?|```", "", response.text).strip()
             
             try:
                 res_data = json.loads(clean_json)
                 
                 for rec in res_data.get("recommendations", []):
-                    # 1. Messaggio del Tutor
-                    msg_text = rec.get("message", "")
-                    st.markdown(msg_text)
+                    # Il messaggio principale ora renderizza il LaTeX grazie a st.markdown
+                    message_content = rec.get("message", "")
+                    st.markdown(message_content)
                     
-                    # 2. BOX VIDEO (Se presente URL)
-                    video_url = rec.get("video_url")
-                    if video_url:
+                    # Se c'è un video, lo carichiamo
+                    if rec.get("video_url"):
                         st.write("---")
-                        st.subheader("🎥 Video Lezione Suggerita")
-                        # Carica il video in un player nativo
-                        st.video(video_url)
-                        st.caption(f"Sorgente: {video_url}")
+                        st.video(rec["video_url"])
                     
-                    # 3. Altri contenuti (Quiz/Soluzioni)
+                    # Soluzioni e Quiz con stile dedicato
                     if rec.get("step_by_step_solution"):
-                        with st.expander("📝 Vedi i passaggi matematici"):
+                        with st.expander("📝 Guarda i passaggi matematici"):
                             for step in rec["step_by_step_solution"]:
-                                st.latex(step) if "$" in step else st.write(step)
+                                # Usiamo markdown per permettere mix di testo e formule inline
+                                st.markdown(f"**-** {step}")
 
-                st.session_state.messages.append({"role": "assistant", "content": msg_text})
+                    if rec.get("quiz_questions"):
+                        st.info("🎯 Mettiti alla prova:")
+                        for q in rec["quiz_questions"]:
+                            st.markdown(f"❓ {q}")
+                
+                st.session_state.messages.append({"role": "assistant", "content": message_content})
 
             except Exception as e:
-                st.error("Non sono riuscito a formattare la risposta. Ecco il testo:")
-                st.write(raw_text)
+                st.error("Errore di formattazione. Testo originale:")
+                st.write(response.text)
