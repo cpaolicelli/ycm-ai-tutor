@@ -77,45 +77,69 @@ if prompt := st.chat_input("Chiedimi una lezione..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Sto preparando la tua lezione..."):
+        with st.spinner("Sto scrivendo la spiegazione matematica..."):
             response = model.generate_content(
                 prompt,
                 tools=tools,
                 generation_config=GenerationConfig(temperature=0.1)
             )
             
-            # Pulizia e parsing JSON
+            # 1. Pulizia della stringa JSON (rimuove i backticks del markdown)
             clean_json = re.sub(r"```json\s?|```", "", response.text).strip()
             
             try:
+                # 2. Parsing del JSON
                 res_data = json.loads(clean_json)
                 
-                for rec in res_data.get("recommendations", []):
-                    # 1. Messaggio discorsivo del Tutor (con LaTeX)
-                    message_text = rec.get("message", "")
-                    st.markdown(message_text)
-                    
-                    # 2. Finestra Anteprima Video (se presente l'URL nel DB)
-                    if rec.get("video_url"):
-                        st.write("---")
-                        st.markdown("### 📺 Video-Lezione Suggerita")
-                        st.video(rec["video_url"])
-                        st.info(f"Titolo lezione: {rec.get('id_lesson', 'Dettagli')}")
-                    
-                    # 3. Soluzioni e Quiz
-                    if rec.get("step_by_step_solution"):
-                        with st.expander("🔍 Procedimento Matematico"):
-                            for step in rec["step_by_step_solution"]:
-                                st.markdown(f"**-** {step}")
+                # Recuperiamo la lista delle raccomandazioni
+                recommendations = res_data.get("recommendations", [])
+                
+                # Se la lista è vuota, proviamo a cercare un messaggio diretto nel root (fallback)
+                if not recommendations and "message" in res_data:
+                    recommendations = [res_data]
 
+                for rec in recommendations:
+                    # --- A. MESSAGGIO PRINCIPALE (LATEX + TEXT) ---
+                    # Estraiamo il testo. Se è None, mettiamo stringa vuota.
+                    message_text = rec.get("message", "")
+                    
+                    # TRUCCO: A volte il JSON ha i \n come doppi backslash \\n se generato male.
+                    # Questo li corregge per farli andare a capo correttamente.
+                    if message_text:
+                        message_text = message_text.replace("\\n", "\n")
+                        st.markdown(message_text)
+                    
+                    # --- B. VIDEO (ANTEPRIMA) ---
+                    if rec.get("video_url"):
+                        st.write("---") # Linea separatrice
+                        st.markdown("### 📺 Video Lezione")
+                        # Container visivo per il video
+                        with st.container():
+                            st.video(rec["video_url"])
+                            st.caption(f"Lezione: {rec.get('id_lesson', 'Dettagli')}")
+                    
+                    # --- C. SOLUZIONI (EXPANDER) ---
+                    if rec.get("step_by_step_solution"):
+                        with st.expander("📝 Vedi i passaggi matematici"):
+                            for step in rec["step_by_step_solution"]:
+                                # Renderizza ogni passaggio come Markdown/LaTeX
+                                st.markdown(f"**•** {step}")
+
+                    # --- D. QUIZ (BOX SUCCESS) ---
                     if rec.get("quiz_questions"):
                         st.write("---")
-                        st.success("🎯 Mettiti alla prova con questi quiz:")
+                        st.markdown("#### 🎯 Mettiti alla prova")
                         for q in rec["quiz_questions"]:
-                            st.markdown(f"❓ {q}")
+                            st.info(f"❓ {q}")
                 
-                # Salvataggio nello storico
-                st.session_state.messages.append({"role": "assistant", "content": message_text})
+                # Salvataggio nello storico (solo il testo del primo messaggio per brevità)
+                if recommendations:
+                    first_msg = recommendations[0].get("message", "")
+                    st.session_state.messages.append({"role": "assistant", "content": first_msg})
 
-            except Exception:
+            except json.JSONDecodeError:
+                # Caso di emergenza: se il JSON è rotto, mostriamo il testo grezzo ma pulito
+                st.error("Errore nel formato della risposta. Ecco il testo grezzo:")
                 st.markdown(response.text)
+            except Exception as e:
+                st.error(f"Si è verificato un errore imprevisto: {e}")
