@@ -53,7 +53,7 @@ Struttura richiesta:
 """
 
 model = GenerativeModel(
-    "gemini-1.5-flash",
+    "gemini-2.5-flash",
     system_instruction=SYSTEM_INSTRUCTION
 )
 
