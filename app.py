@@ -10,26 +10,30 @@ LOCATION = "us-central1"
 DATA_STORE_ID = "ycm-rag-1"
 DATA_STORE_PATH = f"projects/{PROJECT_ID}/locations/global/collections/default_collection/dataStores/{DATA_STORE_ID}"
 
-# 1. Recupero e pulizia dei segreti
 if "gcp_service_account" in st.secrets:
     creds_info = dict(st.secrets["gcp_service_account"])
     
-    # TRUCCO FONDAMENTALE: 
-    # Sostituisce i doppi backslash con veri a-capo per la chiave privata
+    # 1. Pulisce i caratteri di escape e assicura il formato PEM corretto
     if "private_key" in creds_info:
-        creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
-    
-    # Crea l'oggetto credenziali
-    credentials = service_account.Credentials.from_service_account_info(creds_info)
-    
-    # Inizializza Vertex AI con credenziali ESPLICITE
-    vertexai.init(
-        project="youcanmath", 
-        location="us-central1", 
-        credentials=credentials
-    )
-else:
-    st.error("Secrets non trovati!")
+        # Rimuove eventuali virgolette extra e trasforma i \n letterali in veri a-capo
+        pk = creds_info["private_key"].replace("\\n", "\n").strip()
+        # Assicura che la chiave inizi e finisca senza spazi orfani
+        if not pk.startswith("-----BEGIN PRIVATE KEY-----"):
+            st.error("La chiave privata non inizia correttamente.")
+        creds_info["private_key"] = pk
+
+    try:
+        # 2. Crea l'oggetto credenziali
+        credentials = service_account.Credentials.from_service_account_info(creds_info)
+        
+        # 3. Inizializzazione (Usa 'us-central1' per l'endpoint API)
+        vertexai.init(
+            project="youcanmath", 
+            location="us-central1", 
+            credentials=credentials
+        )
+    except Exception as e:
+        st.error(f"Errore durante la creazione delle credenziali: {e}")
 
 # 2. Configurazione dello Schema di Risposta (JSON)
 response_schema = {
