@@ -90,7 +90,7 @@ if prompt := st.chat_input("Chiedimi una lezione..."):
             try:
                 # 2. Parsing del JSON
                 res_data = json.loads(clean_json)
-                
+                st.session_state.messages.append(res_data)
                 # Recuperiamo la lista delle raccomandazioni
                 recommendations = res_data.get("recommendations", [])
                 
