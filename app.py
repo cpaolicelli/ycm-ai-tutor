@@ -61,7 +61,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("📐 YouCanMath AI Tutor")
+st.title("👨🏻‍🏫 YouCanMath AI Tutor")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
