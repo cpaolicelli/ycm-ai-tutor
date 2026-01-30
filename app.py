@@ -43,6 +43,20 @@ REGOLE MATEMATICHE:
 REGOLE FORMATO:
 - Rispondi SEMPRE in JSON.
 - Il campo "message" deve contenere la spiegazione amichevole completa.
+
+Struttura JSON:
+{
+  "intent": "spiegazione" | "interrogazione" | "risoluzione_esercizio",
+  "recommendations": [
+    {
+      "id_lesson": "ID",
+      "video_url": "URL",
+      "message": "Testo con formule LaTeX inline (es: $f(x) = y$)",
+      "quiz_questions": ["Domande con LaTeX"],
+      "step_by_step_solution": ["Passaggi con LaTeX"]
+    }
+  ]
+}
 """
 
 model = GenerativeModel(
@@ -90,7 +104,7 @@ if prompt := st.chat_input("Chiedimi una lezione..."):
             try:
                 # 2. Parsing del JSON
                 res_data = json.loads(clean_json)
-                st.session_state.messages.append(res_data)
+                
                 # Recuperiamo la lista delle raccomandazioni
                 recommendations = res_data.get("recommendations", [])
                 
