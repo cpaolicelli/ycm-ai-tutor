@@ -122,7 +122,8 @@ if prompt := st.chat_input("Chiedimi una spiegazione matematica..."):
                 clean_json = re.sub(r"```json\s?|```", "", response.text).strip()
                 
                 # FIX: Escape dei backslash per LaTeX se il modello non lo ha fatto
-                clean_json = re.sub(r'(?<!\\)\\(?!["\\/bfnrtu])', r'\\\\', clean_json)
+                # Modificata regex per includere anche \f (frac), \t (tan), \b, \r ma escludere \n e unipcode validi
+                clean_json = re.sub(r'(?<!\\)\\(?!["\\/n]|u[0-9a-fA-F]{4})', r'\\\\', clean_json)
                 
                 # Parsing
                 res_data = json.loads(clean_json)
