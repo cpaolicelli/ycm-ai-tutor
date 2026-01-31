@@ -8,8 +8,9 @@ from vertexai.generative_models import GenerativeModel, Tool, grounding, Generat
 # --- CONFIGURAZIONE ---
 PROJECT_ID = "youcanmath"
 LOCATION = "europe-west1"
-DATA_STORE_ID = "ycm-rag-1"
+DATA_STORE_ID = "ycm-rag-unstructured"
 DATA_STORE_PATH = f"projects/{PROJECT_ID}/locations/global/collections/default_collection/dataStores/{DATA_STORE_ID}"
+BASE_VIDEO_URL = "https://ycm-video.b-cdn.net"
 
 # --- AUTENTICAZIONE ---
 if "gcp_service_account" in st.secrets:
@@ -140,7 +141,7 @@ if prompt := st.chat_input("Chiedimi una spiegazione matematica..."):
                         full_response_text += message_content + "\n\n"
 
                     # 2. VIDEO (Se presente)
-                    if rec.get("video_url"):
+                    if rec.get("lesson_id"):
                         st.write("---")
                         st.markdown(f"### 📺 Video Lezione: {rec.get('id_lesson', '')}")
                         st.video(rec["video_url"])
