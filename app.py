@@ -152,7 +152,7 @@ if prompt := st.chat_input("Chiedimi una spiegazione matematica..."):
                         # Includiamo Titolo e Snippet per aiutare la scelta
                         candidates_text += f"{i}. [ID: {res['id']}] Titolo: {res['title']}\n   Contenuto: {res['content'][:300]}...\n\n"
                     
-                    st.toast(f"Trovati {len(search_results)} documenti candidati.")
+                    # st.toast(f"Trovati {len(search_results)} documenti candidati.")
                 else:
                     candidates_text += "Nessun documento trovato dalla ricerca manuale.\n"
 
