@@ -4,6 +4,8 @@ import json
 import re
 from google.oauth2 import service_account
 from vertexai.generative_models import GenerativeModel, Tool, grounding, GenerationConfig
+from api.client import ApiClient
+from rag.engine import RagEngine
 
 # --- CONFIGURAZIONE ---
 PROJECT_ID = "youcanmath"
@@ -25,9 +27,24 @@ if "gcp_service_account" in st.secrets:
     except Exception as e:
         st.error(f"Errore Credenziali: {e}")
 
+
 # --- SETUP RAG E MODELLO ---
+# Initializza RagEngine
+rag_engine = None
+if credentials:
+    try:
+       # Discovery Engine richiede location="global" se il datastore è globale
+       rag_engine = RagEngine(
+           project_id=PROJECT_ID,
+           location="global", 
+           data_store_id=DATA_STORE_ID,
+           credentials=credentials
+       )
+    except Exception as e:
+        st.error(f"Errore inizializzazione Ricerca Manuale: {e}")
+
 tools = [
-    Tool.from_retrieval(
+     Tool.from_retrieval(
         retrieval=grounding.Retrieval(
             source=grounding.VertexAISearch(datastore=DATA_STORE_PATH)
         )
@@ -51,7 +68,7 @@ REGOLE DI FORMATO (MANDATORIE):
   "intent": "spiegazione" | "interrogazione" | "risoluzione_esercizio",
   "recommendations": [
     {
-      "id_lesson": "Codice o Titolo Lezione",
+      "lesson_id": "Seleziona ESCLUSIVAMENTE uno degli ID elencati nella sezione 'CANDIDATE LESSONS' del prompt. Scegli quello più pertinente alla richiesta. Se nessuno è pertinente, usa null.",
       "video_url": "URL completo (o null se non presente)",
       "message": "Qui inserisci la spiegazione diretta. Usa Markdown per titoli (###) e liste. Usa LaTeX tra dollari ($...$) per le formule. Sii breve.",
       "quiz_questions": ["Domanda 1 mirata", "Domanda 2 mirata"],
@@ -72,6 +89,8 @@ model = GenerativeModel(
 
 # --- INTERFACCIA UTENTE ---
 st.set_page_config(page_title="YouCanMath AI Tutor", page_icon="📐", layout="centered")
+
+api_client = ApiClient()
 
 # CSS Migliorato per LaTeX e Spaziatura
 st.markdown("""
@@ -118,13 +137,35 @@ if prompt := st.chat_input("Chiedimi una spiegazione matematica..."):
     with st.chat_message("assistant"):
         with st.spinner("Elaborazione della lezione in corso..."):
             try:
-                # Chiamata al Modello
+                # 1. RICERCA MANUALE (Top 3 Candidati)
+                search_results = []
+                if rag_engine:
+                    try:
+                        search_results = rag_engine.search(prompt, limit=3)
+                    except Exception as e:
+                        st.warning(f"Ricerca manuale fallita: {e}")
+                
+                # 2. COSTRUZIONE CONTESTO CANDIDATI
+                candidates_text = "\n\n=== CANDIDATE LESSONS (Scegli l'ID più appropriato da qui) ===\n"
+                if search_results:
+                    for i, res in enumerate(search_results, 1):
+                        # Includiamo Titolo e Snippet per aiutare la scelta
+                        candidates_text += f"{i}. [ID: {res['id']}] Titolo: {res['title']}\n   Contenuto: {res['content'][:300]}...\n\n"
+                    
+                    st.toast(f"Trovati {len(search_results)} documenti candidati.")
+                else:
+                    candidates_text += "Nessun documento trovato dalla ricerca manuale.\n"
+
+                # Prompt Arricchito
+                augmented_prompt = f"{prompt}\n{candidates_text}"
+                
+                # 3. GENERAZIONE CON GEMINI (Usa Native RAG per la teoria approfondita + Candidati per ID)
                 response = model.generate_content(
-                    prompt,
-                    tools=tools,
+                    augmented_prompt,
+                    tools=tools, # Manteniamo Native RAG per la "Knowledge Base" completa
                     generation_config=GenerationConfig(temperature=0.1)
                 )
-                
+
                 # Pulizia JSON (Rimuove markdown ```json ... ```)
                 clean_json = re.sub(r"```json\s?|```", "", response.text).strip()
                 
@@ -149,11 +190,34 @@ if prompt := st.chat_input("Chiedimi una spiegazione matematica..."):
                         full_response_text += message_content + "\n\n"
 
                     # 2. VIDEO (Se presente)
-                    if rec.get("lesson_id"):
-                        st.write("---")
-                        st.markdown(f"### 📺 Video Lezione: {rec.get('id_lesson', '')}")
-                        st.video(rec["video_url"])
-                        full_response_text += f"[Video: {rec['video_url']}]\n"
+                    if lesson_id := rec.get("lesson_id"):
+                        try:
+                            video_api_url = f"https://api.youcanmath.it/lesson/get-video/{lesson_id}"
+                            api_response = api_client.get(video_api_url)
+                            
+                            if api_response.status_code == 200:
+                                # Assuming the response text IS the partial URL as per user instruction
+                                partial_url = api_response.text.strip().strip('"') # Clean quotes if JSON string
+                                # If response is JSON {"url": ...}, try parsing?
+                                try:
+                                     json_resp = api_response.json()
+                                     if isinstance(json_resp, dict) and "url" in json_resp:
+                                         partial_url = json_resp["url"]
+                                     elif isinstance(json_resp, str): # if json is just a string
+                                         partial_url = json_resp
+                                except:
+                                    pass # Fallback to text
+                                
+                                full_video_url = f"{BASE_VIDEO_URL}/{partial_url}"
+                                
+                                st.write("---")
+                                st.markdown(f"### 📺 Video Lezione: {rec.get('id_lesson', '')}")
+                                st.video(full_video_url)
+                                full_response_text += f"[Video: {full_video_url}]\n"
+                            else:
+                                st.warning(f"Video non disponibile (API Error: {api_response.status_code})")
+                        except Exception as e:
+                            st.warning(f"Errore caricamento video: {e}")
 
                     # 3. QUIZ (Se presenti)
                     if rec.get("quiz_questions"):
