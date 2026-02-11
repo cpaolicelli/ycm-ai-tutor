@@ -1,243 +1,85 @@
 import streamlit as st
-import vertexai
-import json
-import re
-from google.oauth2 import service_account
-from vertexai.generative_models import GenerativeModel, Tool, grounding, GenerationConfig
+from services.auth import get_gcp_credentials
+from services.rag_service import RagService
+from services.llm import GeminiTutor
 from api.client import ApiClient
-from rag.engine import RagEngine
+from ui.styles import apply_custom_styles
+from ui.components import render_history, render_recommendation, get_history_text
 
-# --- CONFIGURAZIONE ---
-PROJECT_ID = "youcanmath"
-LOCATION = "europe-west1"
-DATA_STORE_ID = "ycm-rag-unstructured"
-DATA_STORE_PATH = f"projects/{PROJECT_ID}/locations/global/collections/default_collection/dataStores/{DATA_STORE_ID}"
-BASE_VIDEO_URL = "https://ycm-video.b-cdn.net"
-
-# --- AUTENTICAZIONE ---
-if "gcp_service_account" in st.secrets:
-    creds_info = dict(st.secrets["gcp_service_account"])
-    if "private_key" in creds_info:
-        pk = creds_info["private_key"].replace("\\n", "\n").strip()
-        creds_info["private_key"] = pk
-
-    try:
-        credentials = service_account.Credentials.from_service_account_info(creds_info)
-        vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
-    except Exception as e:
-        st.error(f"Errore Credenziali: {e}")
-
-
-# --- SETUP RAG E MODELLO ---
-# Initializza RagEngine
-rag_engine = None
-if credentials:
-    try:
-       # Discovery Engine richiede location="global" se il datastore è globale
-       rag_engine = RagEngine(
-           project_id=PROJECT_ID,
-           location="global", 
-           data_store_id=DATA_STORE_ID,
-           credentials=credentials
-       )
-    except Exception as e:
-        st.error(f"Errore inizializzazione Ricerca Manuale: {e}")
-
-tools = [
-     Tool.from_retrieval(
-        retrieval=grounding.Retrieval(
-            source=grounding.VertexAISearch(datastore=DATA_STORE_PATH)
-        )
-    )
-]
-
-SYSTEM_INSTRUCTION = """Sei il tutor di matematica di YouCanMath.
-Il tuo obiettivo è risolvere i dubbi dello studente in modo PUNTUALE, SINTETICO e PRATICO.
-Lo studente segue già videolezioni, quindi NON fare lezioni teoriche generali se non strettamente necessario.
-
-REGOLE DI COMPORTAMENTO (CRUCIALI):
-1. **Sintesi Estrema:** Evita spiegazioni enciclopediche o introduttive. Vai dritto al punto della domanda.
-2. **Pratica su Teoria:** Se l'utente chiede un esempio o un esercizio, fornisci una brevissima premessa (max 1-2 frasi) e concentra tutta la risposta sulla risoluzione pratica passo-passo dell'esempio.
-3. **Rispondi alla domanda:** Se l'utente chiede un dettaglio specifico (es. "perché questo numero è 6?"), spiega solo quel passaggio logico, senza rispiegare tutta la regola generale da capo.
-4. **Niente "Muri di Testo":** Usa liste puntate e vai a capo spesso. La spiegazione deve avvenire *attraverso* l'esercizio, non *prima* dell'esercizio.
-
-REGOLE DI FORMATO (MANDATORIE):
-1. Rispondi ESCLUSIVAMENTE con un oggetto JSON valido. Niente testo prima o dopo.
-2. Usa la seguente struttura esatta:
-{
-  "intent": "spiegazione" | "interrogazione" | "risoluzione_esercizio",
-  "recommendations": [
-    {
-      "lesson_id": "Seleziona ESCLUSIVAMENTE uno degli ID elencati nella sezione 'CANDIDATE LESSONS' del prompt. Scegli quello più pertinente alla richiesta. Se nessuno è pertinente, usa null.",
-      "video_url": "URL completo (o null se non presente)",
-      "message": "Qui inserisci la spiegazione diretta. Usa Markdown per titoli (###) e liste. Usa LaTeX tra dollari ($...$) per le formule. Sii breve.",
-      "quiz_questions": ["Domanda 1 mirata", "Domanda 2 mirata"],
-      "step_by_step_solution": ["Passaggio 1 con calcolo esplicito", "Passaggio 2 con risultato"]
-    }
-  ]
-}
-
-REGOLE DI CONTENUTO:
-- Usa LaTeX per TUTTI i simboli matematici (es. $x$, $\\alpha$, $\\frac{a}{b}$).
-- Se l'utente chiede un esempio, usane uno numerico concreto e risolvilo nel campo 'message' o 'step_by_step_solution'.
-"""
-
-model = GenerativeModel(
-    "gemini-2.5-flash",
-    system_instruction=SYSTEM_INSTRUCTION
-)
-
-# --- INTERFACCIA UTENTE ---
+# --- SETUP ---
 st.set_page_config(page_title="YouCanMath AI Tutor", page_icon="📐", layout="centered")
 
+# 1. Autenticazione & Inizializzazione Servizi
+credentials = get_gcp_credentials()
+rag_service = RagService(credentials)
+tutor = GeminiTutor()
 api_client = ApiClient()
 
-# CSS Migliorato per LaTeX e Spaziatura
-st.markdown("""
-    <style>
-    /* Migliora leggibilità testo generale - Rimosso colore fisso per compatibilità Dark Mode */
-    .stMarkdown p { font-size: 1.05rem; line-height: 1.6; }
-    
-    /* Colore e stile per le formule LaTeX */
-    .katex { font-size: 1.1em !important; }
-    
-    /* Light Mode per KaTeX (Default Blue) */
-    @media (prefers-color-scheme: light) {
-        .katex { color: #0d47a1; }
-    }
-    
-    /* Dark Mode per KaTeX (Light Blue/Cyan) */
-    @media (prefers-color-scheme: dark) {
-        .katex { color: #64b5f6; }
-    }
-
-    /* Stile per il box del video */
-    div[data-testid="stVideo"] { border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    /* Stile per i box dei quiz */
-    .stInfo { background-color: rgba(227, 242, 253, 0.5); border-left-color: #1e88e5; }
-    </style>
-    """, unsafe_allow_html=True)
-
+# 2. UI Setup
+# 2. UI Setup
+apply_custom_styles()
 st.title("📐 YouCanMath AI Tutor")
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# Expander per Immagini
+with st.expander("📸 Carica un'immagine del problema (opzionale)"):
+    uploaded_file = st.file_uploader("Allega immagine", type=["jpg", "jpeg", "png", "webp"])
 
-# Visualizzazione Storico
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# 3. Rendering Storico
+render_history()
 
-# Input Utente
+# --- CHAT LOOP ---
 if prompt := st.chat_input("Chiedimi una spiegazione matematica..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Preparazione messaggio utente
+    user_msg = {"role": "user", "content": prompt}
+    image_data = None
+    
+    if uploaded_file:
+        image_data = uploaded_file.getvalue()
+        user_msg["image"] = image_data
+
+    # Salva messaggio utente
+    st.session_state.messages.append(user_msg)
+    
     with st.chat_message("user"):
+        if image_data:
+            st.image(image_data, width=200)
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
         with st.spinner("Elaborazione della lezione in corso..."):
             try:
-                # 1. RICERCA MANUALE (Top 3 Candidati)
-                search_results = []
-                if rag_engine:
-                    try:
-                        search_results = rag_engine.search(prompt, limit=3)
-                    except Exception as e:
-                        st.warning(f"Ricerca manuale fallita: {e}")
+                # A. Recupero Candidati Manuali (RAG Engine)
+                # search_results serve se vuoi debuggare, candidates_text va al modello
+                _, candidates_text = rag_service.search_candidates(prompt)
+
+                # B. Ottieni Storico
+                # Recuperiamo tutto tranne l'ultimo (il prompt corrente)
+                current_history = st.session_state.messages[:-1]
                 
-                # 2. COSTRUZIONE CONTESTO CANDIDATI
-                candidates_text = "\n\n=== CANDIDATE LESSONS (Scegli l'ID più appropriato da qui) ===\n"
-                if search_results:
-                    for i, res in enumerate(search_results, 1):
-                        # Includiamo Titolo e Snippet per aiutare la scelta
-                        candidates_text += f"{i}. [ID: {res['id']}] Titolo: {res['title']}\n   Contenuto: {res['content'][:300]}...\n\n"
-                    
-                    # st.toast(f"Trovati {len(search_results)} documenti candidati.")
+                # Funzione helper rapida per formattare solo questa slice
+                history_text_formatted = "\n\n=== PREVIOUS CONVERSATION ===\n"
+                if current_history:
+                    for msg in current_history:
+                        role = "Student" if msg["role"] == "user" else "Tutor"
+                        content = msg["content"][:300] + "..." if len(msg["content"]) > 300 else msg["content"]
+                        history_text_formatted += f"{role}: {content}\n"
                 else:
-                    candidates_text += "Nessun documento trovato dalla ricerca manuale.\n"
+                    history_text_formatted += "Nessuna conversazione precedente.\n"
 
-                # Prompt Arricchito
-                augmented_prompt = f"{prompt}\n{candidates_text}"
+                # C. Generazione Risposta (LLM) - Passiamo image_data se presente
+                response = tutor.generate_response(prompt, history_text_formatted, candidates_text, image_data=image_data)
                 
-                # 3. GENERAZIONE CON GEMINI (Usa Native RAG per la teoria approfondita + Candidati per ID)
-                response = model.generate_content(
-                    augmented_prompt,
-                    tools=tools, # Manteniamo Native RAG per la "Knowledge Base" completa
-                    generation_config=GenerationConfig(temperature=0.1)
-                )
-
-                # Pulizia JSON (Rimuove markdown ```json ... ```)
-                clean_json = re.sub(r"```json\s?|```", "", response.text).strip()
+                # D. Parsing & Rendering
+                res_data = tutor.clean_json_response(response.text)
                 
-                # FIX: Escape dei backslash per LaTeX se il modello non lo ha fatto
-                # Modificata regex per includere anche \f (frac), \t (tan), \b, \r ma escludere \n e unipcode validi
-                clean_json = re.sub(r'(?<!\\)\\(?!["\\/n]|u[0-9a-fA-F]{4})', r'\\\\', clean_json)
-                
-                # Parsing
-                res_data = json.loads(clean_json)
-                
-                # Loop sulle raccomandazioni
-                full_response_text = "" # Per salvare nello storico alla fine
-                
+                full_response_text = ""
                 for rec in res_data.get("recommendations", []):
-                    
-                    # 1. MESSAGGIO PRINCIPALE (TEORIA)
-                    # Qui st.markdown farà la magia: interpreterà i ### come titoli, 
-                    # i \n come a capo e i $...$ come LaTeX
-                    message_content = rec.get("message", "")
-                    if message_content:
-                        st.markdown(message_content)
-                        full_response_text += message_content + "\n\n"
-
-                    # 2. VIDEO (Se presente)
-                    if lesson_id := rec.get("lesson_id"):
-                        try:
-                            video_api_url = f"https://api.youcanmath.it/lesson/get-video/{lesson_id}"
-                            api_response = api_client.get(video_api_url)
-                            
-                            if api_response.status_code == 200:
-                                # Assuming the response text IS the partial URL as per user instruction
-                                partial_url = api_response.text.strip().strip('"') # Clean quotes if JSON string
-                                # If response is JSON {"url": ...}, try parsing?
-                                try:
-                                     json_resp = api_response.json()
-                                     if isinstance(json_resp, dict) and "url" in json_resp:
-                                         partial_url = json_resp["url"]
-                                     elif isinstance(json_resp, str): # if json is just a string
-                                         partial_url = json_resp
-                                except:
-                                    pass # Fallback to text
-                                
-                                full_video_url = f"{BASE_VIDEO_URL}/{partial_url}"
-                                
-                                st.write("---")
-                                st.markdown(f"### 📺 Video Lezione: {rec.get('id_lesson', '')}")
-                                st.video(full_video_url)
-                                full_response_text += f"[Video: {full_video_url}]\n"
-                            else:
-                                st.warning(f"Video non disponibile (API Error: {api_response.status_code})")
-                        except Exception as e:
-                            st.warning(f"Errore caricamento video: {e}")
-
-                    # 3. QUIZ (Se presenti)
-                    if rec.get("quiz_questions"):
-                        st.write("---")
-                        st.markdown("### 📝 Quiz di verifica")
-                        for i, q in enumerate(rec["quiz_questions"], 1):
-                            # st.info supporta Markdown e LaTeX al suo interno!
-                            st.info(f"**{i}.** {q}") 
-
-                    # 4. SOLUZIONE STEP-BY-STEP (Se presente)
-                    if rec.get("step_by_step_solution"):
-                        with st.expander("🔍 Vedi Soluzione Passo-Passo"):
-                            for step in rec["step_by_step_solution"]:
-                                st.markdown(f"- {step}")
-
-                # Aggiornamento storico messaggi (salviamo il testo base per semplicità)
+                    full_response_text += render_recommendation(rec, api_client)
+                
+                # E. Salva Risposta Tutor nello Storico
                 st.session_state.messages.append({"role": "assistant", "content": full_response_text})
 
-            except json.JSONDecodeError:
-                st.error("Errore nel formato della risposta. Visualizzo il testo grezzo:")
-                st.write(response.text)
             except Exception as e:
-                st.error(f"Errore imprevisto: {e}")
+                st.error(f"Qualcosa è andato storto: {e}")
+                # st.write(response.text) # Uncomment for debug
